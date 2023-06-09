@@ -1,0 +1,309 @@
+import numpy as np
+from scipy.io import loadmat
+import nibabel as nib
+
+##########
+# code written by Oliver J Gurney-Champion
+# code adapted from MAtlab code by Eric Schrauben: https://github.com/schrau24/XCAT-ERIC
+# This code generates a 4D IVIM phantom as nifti file
+
+def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False):
+    if motion:
+        states = range(1,21)
+    else:
+        states = [1]
+    for state in states:
+        # Load the .mat file
+        mat_data = loadmat('XCAT_MAT_RESP/XCAT5D_RP_' + str(state) + '_CP_1.mat')
+
+        # Access the variables in the loaded .mat file
+        XCAT = mat_data['IMG']
+        XCAT = XCAT[0:-1:2,0:-1:2,10:80:2]
+
+        tissue_included, D, f, Ds = contrast_curve_calc()
+
+        S = XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds)
+
+        if rician:
+            S = np.abs(S + np.random.normal(loc=0, scale = noise, size = np.shape(S)) + 1j * np.random.normal(loc=0, scale = noise, size = np.shape(S)))
+        else:
+            S = S + np.random.normal(loc=0, scale = noise, size = np.shape(S))
+        try:
+            totsig=np.append(totsig,np.expand_dims(S, 4), axis=4)
+        except:
+            totsig = np.expand_dims(S, 4)
+    if motion:
+        state = 0
+        state2 = 0
+        for b in range(np.shape(totsig)[3]):
+            for a in range(np.shape(totsig)[2]):
+                S[:,:,a,b]=totsig[:,:,a,b,state]
+                if state2 == 5:
+                    state2 = 0
+                    state = state + 1
+                    if state == 20:
+                        state = 0
+                else:
+                    state2 = state2+1
+    else:
+        S=np.squeeze(totsig)
+    return S
+
+
+def ivim(bvalues,D,f,Ds):
+    return (1-f) * np.exp(-D * bvalues) + f * np.exp(-Ds * bvalues)
+
+def contrast_curve_calc():
+    tissue_included = np.array([1, 2, 3, 4, 5, 6, 7, 8, 13, 17, 18, 20, 22, 23, 24, 25, 26, 30, 36, 37, 40, 41, 42, 43, 50, 73])
+
+    D = np.zeros(74)
+    D[1] = 2e-3  # 1 Myocardium LV
+    D[2] = 2e-3  # 2 myocardium RV
+    D[3] = 2e-3  # 3 myocardium la
+    D[4] = 1.5e-3  # 4 myocardium ra
+    D[5] = 3e-3  # 5 Blood LV
+    D[6] = 3e-3  # 6 Blood RV
+    D[7] = 3e-3  # 7 Blood la
+    D[8] = 3e-3  # 8 Blood ra
+    D[13] = 1.2e-3  # 13 liver
+    D[17] = 1e-3  # 17 esophagus
+    D[18] = 1e-3  # 18 esophagus cont
+    D[20] = 1e-3  # 20 stomach wall
+    D[22] = 1.3e-3  # 22 Pancreas (from literature)
+    D[23] = 2e-3   # 23 right kydney cortex
+    D[24] = 1e-3   # 23 right kydney medulla
+    D[25] = 2e-3   # 23 left kydney cortex
+    D[26] = 1e-3   # 23 left kydney medulla
+    D[30] = 0.8e-3  # 30 spleen
+    D[36] = 3e-3  # 36 artery
+    D[37] = 3e-3   # 37 vein
+    D[40] = 3e-3  # 40 asc lower intestine
+    D[41] = 3e-3  # 41 trans lower intestine
+    D[42] = 3e-3  # 42 desc lower intestine
+    D[43] = 3e-3  # 43 small intestine
+    D[50] = 3e-3  # 50 pericardium
+    D[73] = 1.8e-3  # 73 Pancreatic tumor (advanced state, from literature)
+
+    f = np.zeros(74)
+    f[1] = 0.07  # 1 Myocardium LV
+    f[2] = 0.07  # 2 myocardium RV
+    f[3] = 0.07  # 3 myocardium la
+    f[4] = 0.07  # 4 myocardium ra
+    f[5] = 1.00  # 5 Blood LV
+    f[6] = 1.00  # 6 Blood RV
+    f[7] = 1.00  # 7 Blood la
+    f[8] = 1.00  # 8 Blood ra
+    f[13] = 0.25  # 13 liver
+    f[17] = 0.1  # 17 esophagus
+    f[18] = 0.1  # 18 esophagus cont
+    f[20] = 0.3  # 20 stomach wall
+    f[22] = 0.15  # 22 Pancreas (from literature)
+    f[23] = 0.3   # 23 right kydney cortex
+    f[24] = 0.2   # 23 right kydney medulla
+    f[25] = 0.3   # 23 left kydney cortex
+    f[26] = 0.2   # 23 left kydney medulla
+    f[30] = 0.4  # 30 spleen
+    f[36] = 1.0   # 36 artery
+    f[37] = 1.0   # 37 vein
+    f[40] = 0.19  # 40 asc lower intestine
+    f[41] = 0.19  # 41 trans lower intestine
+    f[42] = 0.19  # 42 desc lower intestine
+    f[43] = 0.19  # 43 small intestine
+    f[50] = 0.07  # 50 pericardium
+    f[73] = 0.37  # 73 Pancreatic tumor (advanced state, from literature)
+
+    Ds = np.zeros(74)
+    Ds[1] = 0.07  # 1 Myocardium LV
+    Ds[2] = 0.07  # 2 myocardium RV
+    Ds[3] = 0.07  # 3 myocardium la
+    Ds[4] = 0.07  # 4 myocardium ra
+    Ds[5] = 0.1  # 5 Blood LV
+    Ds[6] = 0.1  # 6 Blood RV
+    Ds[7] = 0.1  # 7 Blood la
+    Ds[8] = 0.1  # 8 Blood ra
+    Ds[13] = 0.05  # 13 liver
+    Ds[17] = 0.05  # 17 esophagus
+    Ds[18] = 0.05  # 18 esophagus cont
+    Ds[20] = 0.07  # 20 stomach wall
+    Ds[22] = 0.01  # 22 Pancreas (from literature)
+    Ds[23] = 0.02   # 23 right kydney cortex
+    Ds[24] = 0.07   # 23 right kydney medulla
+    Ds[25] = 0.02   # 23 left kydney cortex
+    Ds[26] = 0.07   # 23 left kydney medulla
+    Ds[30] = 0.08  # 30 spleen
+    Ds[36] = 0.1   # 36 artery
+    Ds[37] = 0.1   # 37 vein
+    Ds[40] = 0.09  # 40 asc lower intestine
+    Ds[41] = 0.09  # 41 trans lower intestine
+    Ds[42] = 0.09  # 42 desc lower intestine
+    Ds[43] = 0.09  # 43 small intestine
+    Ds[50] = 0.01  # 50 pericardium
+    Ds[73] = 0.01  # 73 Pancreatic tumor (advanced state, from literature)
+    # Return values
+
+    return tissue_included, D, f, Ds
+
+
+def XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds, b0=3, ivim_cont = True, Contrast = 'SE', FA=90):
+    ###########################################################################################
+    # This script converts XCAT tissue values to MR contrast based on the SSFP signal equation.
+    # Christopher W. Roy 2018-12-04 # fetal.xcmr@gmail.com
+    # T1 and T2 values are stored in a table with the format:
+    # [T1 @ 1.5 T, T2 @ 1.5 T, T1 @ 3.0 T, T2 @ 3.0 T]
+    # Note the current implimentation is for 1.5T
+    # Relaxation values are based off of:
+    # Stanisz GJ, Odrobina EE, Pun J, Escaravage M, Graham SJ, Bronskill MJ, Henkelman RM. T1, T2 relaxation and magnetization transfer in tissue at 3T. Magnetic resonance in medicine. 2005;54:507�12.
+    # Portnoy S, Osmond M, Zhu MY, Seed M, Sled JG, Macgowan CK. Relaxation properties of human umbilical cord blood at 1.5 Tesla. Magnetic Resonance in Medicine. 2016;00:1�13.
+    # https://www.itis.ethz.ch/virtual-population/tissue-properties/XCATbase/relaxation-times/ #Tissue legend: # 1 Myocardium LV
+    # 2 myocardium RV #
+    # 3 myocardium la
+    # 4 myocardium ra # 5 Blood LV
+    #6 Blood RV
+    #7 Blood LA
+    #8 Blood RA
+    #9 body
+    #10 muscle
+    #11 Brain
+    #12 Sinus
+    #13 Liver
+    #14 gall bladder
+    #15 Right Lung
+    #16 Left Lung
+    #17 esophagus
+    #18 esophagus cont
+    #19 laryngopharynx
+    #20 st wall
+    #21 Stomach Contents
+    #22 pancreas
+    #23 Right kydney cortex
+    #24 right kidney medulla
+    #25 Left kidney cortex
+    #26 left kidney medulla
+    #27 adrenal
+    #28 Right Renal Pelvis
+    #29 Left Renal Pelvis
+    #30 spleen
+    #31 Ribs
+    #32 Cortical Bone
+    #33 Spine
+    #34 spinal cord
+    #35 Bone Marrow
+    #36 Artery
+    #37 Vein
+    #38 bladder
+    #39 prostate
+    #40 asc lower intestine
+    #41 trans lower intestine
+    #42 desc lower intestine
+    #43 small intestine
+    #44 rectum
+    #45 seminal vescile
+    #46 vas deference
+    #47 testicles
+    #48 epididymus
+    #49 ejac duct
+    #50 pericardium
+    #51 Cartilage
+    #52 Intestine Cavity
+    #53 ureter
+    #54 urethra
+    #55 Lymph
+    #56 lymph abnormal
+    #57 trach bronch
+    #58 Airway
+    #59 uterus
+    #60 vagina
+    #61 right ovary
+    #62 left ovary
+    #63 FAllopian tubes
+    #64 Parathyroid
+    #65 Thyroid
+    #66 Thymus
+    #67 salivary
+    #68 Pituitary
+    #69 Eye
+    #70 eye lens
+    #71 lesion
+    #72 Fat
+    # 73 Pancreas tumor ##############################################################################
+
+    Tissue = np.zeros((73, 4))
+    Tissue[0] = [1030, 40, 1471, 47]
+    Tissue[1] = [1030, 40, 1471, 47]
+    Tissue[2] = [1030, 40, 1471, 47]
+    Tissue[3] = [1030, 40, 1471, 47]
+    Tissue[4] = [1441, 290, 1932, 275]
+    Tissue[5] = [1441, 290, 1932, 275]
+    Tissue[6] = [1441, 290, 1932, 275]
+    Tissue[7] = [1441, 290, 1932, 275]
+    Tissue[8] = [1008, 44, 1412, 50.00]
+    Tissue[9] = [981.5, 36, 1232.9, 37.20]
+    Tissue[10] = [884, 72, 1084, 69]
+    Tissue[11] = [0, 0, 0, 0]
+    Tissue[12] = [576, 46, 812, 42]
+    Tissue[13] = [576, 46, 812, 42]
+    Tissue[14] = [0, 0, 0, 0]
+    Tissue[15] = [0, 0, 0, 0]
+    Tissue[16] = [576, 46, 812, 42]
+    Tissue[17] = [576, 46, 812, 42]
+    Tissue[18] = [1045.5, 37.3, 1201, 44]
+    Tissue[19] = [981.5, 36, 1232.9, 37.20]
+    #Tissue[20] = [981.5, 36, 1232.9, 37.20]
+    Tissue[20] = [0, 0, 0, 0]
+    Tissue[21] = [584, 46, 725, 43]
+    Tissue[22] = [828, 71, 1168, 66]
+    Tissue[23] = [1412, 85, 1545, 81]
+    Tissue[24] = [828, 71, 1168, 66]
+    Tissue[25] = [1412, 85, 1545, 81]
+    Tissue[26] = [576, 46, 812, 42]
+    Tissue[27] = [200, 0.5, 302, 0.25]
+    Tissue[28] = [200, 0.5, 302, 0.25]
+    Tissue[29] = [1057, 79, 1328, 61]
+    Tissue[30] = [200, 0.5, 302, 0.25]
+    Tissue[31] = [200, 0.5, 302, 0.25]
+
+    MR = np.zeros(XCAT.shape+(len(bvalue),), dtype=np.float32)
+    for iTissue in range(len(Tissue)):
+        if b0 == 1.5:
+            T1 = Tissue[iTissue, 0]
+            T2 = Tissue[iTissue, 1]
+        else:
+            T1 = Tissue[iTissue, 2]
+            T2 = Tissue[iTissue, 3]
+
+        if ivim_cont and iTissue in tissue_included:
+            # note we are assuming blood fraction has the same T1 as tissue fraction here for simplicity. Can be changed in future.
+            S0 = ivim(bvalue,D[iTissue],f[iTissue],Ds[iTissue])
+        else:
+            S0 = np.zeros(len(bvalue))
+        if T1 > 0 or T2 > 0:
+            if Contrast == 'GRE':
+                if iTissue not in [31, 32, 33]:
+                    MR = MR + (XCAT == iTissue) * np.sin(np.deg2rad(FA)) * (1 - np.exp(-TR / T1)) / (
+                                1 - (np.cos(np.deg2rad(FA)) * np.exp(-TR / T1)))
+            elif Contrast == 'bSSFP':
+                MR = MR + (XCAT == iTissue) * np.sin(np.deg2rad(FA)) * (1 - np.exp(-TR / T1)) * np.exp(-TE / T2) / (
+                            1 - (np.exp(-TR / T1) - np.exp(-TR / T2)) * np.cos(np.deg2rad(FA)) - np.exp(
+                        -TR / T1) * np.exp(-TR / T2))
+            elif Contrast == 'SE':
+                MR = MR + np.tile(np.expand_dims(XCAT == iTissue,3),len(S0)) * S0 * (1 - 2 * np.exp(-(TR - TE / 2) / T1) + np.exp(-TR / T1)) * np.exp(
+                    -TE / T2)
+            else:
+                raise ValueError('Unknown MR contrast. Use only GRE, bSSFP, or SE.')
+    return MR
+
+if __name__ == '__main__':
+    bvalue = np.array([0., 1, 2, 5, 10, 20, 30, 50, 75, 100, 150, 250, 350, 400, 550, 700, 850, 1000])
+    noise = 0.005
+    motion = False
+    sig = phantom(bvalue, noise,motion=motion)
+    sig = sig * 50000
+    sig = np.flip(sig,axis=0)
+    sig = np.flip(sig,axis=1)
+    nifti_img = nib.Nifti1Image(sig, affine=np.eye(4))  # Replace affine if necessary
+    # Save the NIfTI image to a file
+    if motion:
+        output_file = 'output_resp.nii.gz'  # Replace with your desired output file name
+    else:
+        output_file = 'output.nii.gz'  # Replace with your desired output file name
+    nib.save(nifti_img, output_file)
