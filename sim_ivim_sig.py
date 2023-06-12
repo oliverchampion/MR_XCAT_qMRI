@@ -7,7 +7,8 @@ import nibabel as nib
 # code adapted from MAtlab code by Eric Schrauben: https://github.com/schrau24/XCAT-ERIC
 # This code generates a 4D IVIM phantom as nifti file
 
-def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False):
+def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False, interleaved=False):
+    np.random.seed(42)
     if motion:
         states = range(1,21)
     else:
@@ -18,7 +19,7 @@ def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False):
 
         # Access the variables in the loaded .mat file
         XCAT = mat_data['IMG']
-        XCAT = XCAT[0:-1:2,0:-1:2,10:80:2]
+        XCAT = XCAT[0:-1:2,0:-1:2,10:160:3]
 
         tissue_included, D, f, Ds = contrast_curve_calc()
 
@@ -35,19 +36,40 @@ def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False):
     if motion:
         state = 0
         state2 = 0
+        slices_per_resp_phase = round(np.shape(XCAT)[2]/20*6000/TR)
         for b in range(np.shape(totsig)[3]):
-            for a in range(np.shape(totsig)[2]):
-                S[:,:,a,b]=totsig[:,:,a,b,state]
-                if state2 == 5:
-                    state2 = 0
-                    state = state + 1
-                    if state == 20:
-                        state = 0
-                else:
-                    state2 = state2+1
+            if not interleaved:
+                for a in range(np.shape(totsig)[2]):
+                    S[:,:,a,b]=totsig[:,:,a,b,state]
+                    if state2 == slices_per_resp_phase:
+                        state2 = 0
+                        state = state + 1
+                        if state == 20:
+                            state = 0
+                    else:
+                        state2 = state2+1
+            else:
+                for a in range(0,np.shape(totsig)[2],2):
+                    S[:,:,a,b]=totsig[:,:,a,b,state]
+                    if state2 == slices_per_resp_phase:
+                        state2 = 0
+                        state = state + 1
+                        if state == 20:
+                            state = 0
+                    else:
+                        state2 = state2+1
+                for a in range(1,np.shape(totsig)[2],2):
+                    S[:,:,a,b]=totsig[:,:,a,b,state]
+                    if state2 == slices_per_resp_phase:
+                        state2 = 0
+                        state = state + 1
+                        if state == 20:
+                            state = 0
+                    else:
+                        state2 = state2+1
     else:
         S=np.squeeze(totsig)
-    return S
+    return S, XCAT
 
 
 def ivim(bvalues,D,f,Ds):
@@ -154,7 +176,8 @@ def XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds, b0=3, ivim_c
     # Relaxation values are based off of:
     # Stanisz GJ, Odrobina EE, Pun J, Escaravage M, Graham SJ, Bronskill MJ, Henkelman RM. T1, T2 relaxation and magnetization transfer in tissue at 3T. Magnetic resonance in medicine. 2005;54:507�12.
     # Portnoy S, Osmond M, Zhu MY, Seed M, Sled JG, Macgowan CK. Relaxation properties of human umbilical cord blood at 1.5 Tesla. Magnetic Resonance in Medicine. 2016;00:1�13.
-    # https://www.itis.ethz.ch/virtual-population/tissue-properties/XCATbase/relaxation-times/ #Tissue legend: # 1 Myocardium LV
+    # https://www.itis.ethz.ch/virtual-population/tissue-properties/XCATbase/relaxation-times/ #Tissue legend:
+    # 1 Myocardium LV
     # 2 myocardium RV #
     # 3 myocardium la
     # 4 myocardium ra # 5 Blood LV
@@ -226,84 +249,134 @@ def XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds, b0=3, ivim_c
     #71 lesion
     #72 Fat
     # 73 Pancreas tumor ##############################################################################
-
-    Tissue = np.zeros((73, 4))
-    Tissue[0] = [1030, 40, 1471, 47]
+    np.random.seed(42)
+    Tissue = np.zeros((74, 4))
     Tissue[1] = [1030, 40, 1471, 47]
     Tissue[2] = [1030, 40, 1471, 47]
     Tissue[3] = [1030, 40, 1471, 47]
-    Tissue[4] = [1441, 290, 1932, 275]
+    Tissue[4] = [1030, 40, 1471, 47]
     Tissue[5] = [1441, 290, 1932, 275]
     Tissue[6] = [1441, 290, 1932, 275]
     Tissue[7] = [1441, 290, 1932, 275]
-    Tissue[8] = [1008, 44, 1412, 50.00]
-    Tissue[9] = [981.5, 36, 1232.9, 37.20]
-    Tissue[10] = [884, 72, 1084, 69]
-    Tissue[11] = [0, 0, 0, 0]
-    Tissue[12] = [576, 46, 812, 42]
+    Tissue[8] = [1441, 290, 1932, 275]
+    #Tissue[9] = [1008, 44, 1412, 50.00]
+    Tissue[9] = [9999999999, 0.00000001, 999999999, 0.00000001] ## fat suppression
+    Tissue[10] = [981.5, 36, 1232.9, 37.20]
+    Tissue[11] = [884, 72, 1084, 69]
+    Tissue[12] = [0, 0, 0, 0]
     Tissue[13] = [576, 46, 812, 42]
-    Tissue[14] = [0, 0, 0, 0]
+    Tissue[14] = [576, 46, 812, 42]
     Tissue[15] = [0, 0, 0, 0]
-    Tissue[16] = [576, 46, 812, 42]
+    Tissue[16] = [0, 0, 0, 0]
     Tissue[17] = [576, 46, 812, 42]
-    Tissue[18] = [1045.5, 37.3, 1201, 44]
-    Tissue[19] = [981.5, 36, 1232.9, 37.20]
+    Tissue[18] = [576, 46, 812, 42]
+    Tissue[19] = [1045.5, 37.3, 1201, 44]
+    Tissue[20] = [981.5, 36, 1232.9, 37.20]
     #Tissue[20] = [981.5, 36, 1232.9, 37.20]
-    Tissue[20] = [0, 0, 0, 0]
-    Tissue[21] = [584, 46, 725, 43]
-    Tissue[22] = [828, 71, 1168, 66]
-    Tissue[23] = [1412, 85, 1545, 81]
-    Tissue[24] = [828, 71, 1168, 66]
-    Tissue[25] = [1412, 85, 1545, 81]
-    Tissue[26] = [576, 46, 812, 42]
-    Tissue[27] = [200, 0.5, 302, 0.25]
+    Tissue[21] = [0, 0, 0, 0]
+    Tissue[22] = [584, 46, 725, 43]
+    Tissue[23] = [828, 71, 1168, 66]
+    Tissue[24] = [1412, 85, 1545, 81]
+    Tissue[25] = [828, 71, 1168, 66]
+    Tissue[26] = [1412, 85, 1545, 81]
+    Tissue[27] = [576, 46, 812, 42]
     Tissue[28] = [200, 0.5, 302, 0.25]
-    Tissue[29] = [1057, 79, 1328, 61]
-    Tissue[30] = [200, 0.5, 302, 0.25]
+    Tissue[29] = [200, 0.5, 302, 0.25]
+    Tissue[30] = [1057, 79, 1328, 61]
     Tissue[31] = [200, 0.5, 302, 0.25]
+    Tissue[32] = [200, 0.5, 302, 0.25]
+    Tissue[33, :] = [200, 0.5, 302, 0.25]
+    Tissue[34, :] = [745, 74, 993, 78]
+    Tissue[35, :] = [549, 49, 586, 49]
+    Tissue[36, :] = [1585, 254, 1664, 147]
+    Tissue[37, :] = [1582, 181, 1584, 66]
+    Tissue[38, :] = [576, 46, 812, 42]
+    Tissue[39, :] = [1317, 88, 1597, 74]
+    Tissue[40, :] = [576, 46, 812, 42]
+    Tissue[41, :] = [576, 46, 812, 42]
+    Tissue[42, :] = [576, 46, 812, 42]
+    Tissue[43, :] = [576, 46, 812, 42]
+    Tissue[44, :] = [576, 46, 812, 42]
+    Tissue[45, :] = [1317, 88, 1597, 74]
+    Tissue[46, :] = [576, 46, 812, 42]
+    Tissue[47, :] = [576, 46, 812, 42]
+    Tissue[48, :] = [576, 46, 812, 42]
+    Tissue[49, :] = [576, 46, 812, 42]
+    Tissue[50, :] = [981.5, 36, 1232.9, 37.20]
+    Tissue[51, :] = [1024, 30, 1168, 27]
+    # Tissue[52, :] = [;;;]
+    Tissue[54, :] = [1434.5, 164, 1498.3, 164]
+    Tissue[55, :] = [1434.5, 164, 1498.3, 164]
+    Tissue[56, :] = [5053, 468, 5053, 468]
+    # Tissue[57, :] = [;;;]
+    Tissue[58, :] = [1045.5, 37.3, 1201, 44]
+    Tissue[59, :] = [0, 0, 0, 0]
+    Tissue[60, :] = [1309, 117, 1514, 79]
+    Tissue[61, :] = [1135, 58, 1616, 83]
+    Tissue[62, :] = [576, 46, 812, 42]
+    Tissue[63, :] = [576, 46, 812, 42]
+    Tissue[64, :] = [576, 46, 812, 42]
+    Tissue[65, :] = [1317, 88, 1597, 74]
+    Tissue[66, :] = [1317, 88, 1597, 74]
+    Tissue[67, :] = [1317, 88, 1597, 74]
+    Tissue[68, :] = [1317, 88, 1597, 74]
+    Tissue[69, :] = [1317, 88, 1597, 74]
+    Tissue[69, :] = [5053, 468, 5053, 468]
+    Tissue[70, :] = [1138, 26, 1138, 26]
+    # Tissue[71, :] = [;;;]
+    # Tissue[72, :] = [312.4, 117.4, 377, 97.5]
+    Tissue[72, :] = [9999999999, 0.00000001, 999999999, 0.00000001] ## fat suppression
+    Tissue[73, :] = [0, 0, 1676, 64]
 
     MR = np.zeros(XCAT.shape+(len(bvalue),), dtype=np.float32)
     for iTissue in range(len(Tissue)):
-        if b0 == 1.5:
-            T1 = Tissue[iTissue, 0]
-            T2 = Tissue[iTissue, 1]
-        else:
-            T1 = Tissue[iTissue, 2]
-            T2 = Tissue[iTissue, 3]
-
-        if ivim_cont and iTissue in tissue_included:
-            # note we are assuming blood fraction has the same T1 as tissue fraction here for simplicity. Can be changed in future.
-            S0 = ivim(bvalue,D[iTissue],f[iTissue],Ds[iTissue])
-        else:
-            S0 = np.zeros(len(bvalue))
-        if T1 > 0 or T2 > 0:
-            if Contrast == 'GRE':
-                if iTissue not in [31, 32, 33]:
-                    MR = MR + (XCAT == iTissue) * np.sin(np.deg2rad(FA)) * (1 - np.exp(-TR / T1)) / (
-                                1 - (np.cos(np.deg2rad(FA)) * np.exp(-TR / T1)))
-            elif Contrast == 'bSSFP':
-                MR = MR + (XCAT == iTissue) * np.sin(np.deg2rad(FA)) * (1 - np.exp(-TR / T1)) * np.exp(-TE / T2) / (
-                            1 - (np.exp(-TR / T1) - np.exp(-TR / T2)) * np.cos(np.deg2rad(FA)) - np.exp(
-                        -TR / T1) * np.exp(-TR / T2))
-            elif Contrast == 'SE':
-                MR = MR + np.tile(np.expand_dims(XCAT == iTissue,3),len(S0)) * S0 * (1 - 2 * np.exp(-(TR - TE / 2) / T1) + np.exp(-TR / T1)) * np.exp(
-                    -TE / T2)
+        if iTissue is not 0:
+            if b0 == 1.5:
+                T1 = Tissue[iTissue, 0]
+                T2 = Tissue[iTissue, 1]
             else:
-                raise ValueError('Unknown MR contrast. Use only GRE, bSSFP, or SE.')
+                T1 = Tissue[iTissue, 2]
+                T2 = Tissue[iTissue, 3]
+
+            if ivim_cont and iTissue in tissue_included:
+                # note we are assuming blood fraction has the same T1 as tissue fraction here for simplicity. Can be changed in future.
+                S0 = ivim(bvalue,D[iTissue],f[iTissue],Ds[iTissue])
+            else:
+                S0 = ivim(bvalue, 5e-4+np.random.rand(1)*3e-3, np.random.rand(1)*0.5, 5e-3+np.random.rand(1)*1e-1)
+                #S0 = np.zeros(len(bvalue))
+            if T1 > 0 or T2 > 0:
+                if Contrast == 'GRE':
+                    if iTissue not in [31, 32, 33]:
+                        MR = MR + (XCAT == iTissue) * np.sin(np.deg2rad(FA)) * (1 - np.exp(-TR / T1)) / (
+                                    1 - (np.cos(np.deg2rad(FA)) * np.exp(-TR / T1)))
+                elif Contrast == 'bSSFP':
+                    MR = MR + (XCAT == iTissue) * np.sin(np.deg2rad(FA)) * (1 - np.exp(-TR / T1)) * np.exp(-TE / T2) / (
+                                1 - (np.exp(-TR / T1) - np.exp(-TR / T2)) * np.cos(np.deg2rad(FA)) - np.exp(
+                            -TR / T1) * np.exp(-TR / T2))
+                elif Contrast == 'SE':
+                    MR = MR + np.tile(np.expand_dims(XCAT == iTissue,3),len(S0)) * S0 * (1 - 2 * np.exp(-(TR - TE / 2) / T1) + np.exp(-TR / T1)) * np.exp(
+                        -TE / T2)
+                else:
+                    raise ValueError('Unknown MR contrast. Use only GRE, bSSFP, or SE.')
     return MR
 
 if __name__ == '__main__':
     bvalue = np.array([0., 1, 2, 5, 10, 20, 30, 50, 75, 100, 150, 250, 350, 400, 550, 700, 850, 1000])
     noise = 0.005
-    motion = False
-    sig = phantom(bvalue, noise,motion=motion)
+    motion = True
+    sig, XCAT = phantom(bvalue, noise,motion=motion,interleaved=True)
     sig = sig * 50000
     sig = np.flip(sig,axis=0)
     sig = np.flip(sig,axis=1)
     nifti_img = nib.Nifti1Image(sig, affine=np.eye(4))  # Replace affine if necessary
     # Save the NIfTI image to a file
     if motion:
-        output_file = 'output_resp.nii.gz'  # Replace with your desired output file name
+        output_file = 'output_resp_int.nii.gz'  # Replace with your desired output file name
     else:
         output_file = 'output.nii.gz'  # Replace with your desired output file name
+    nib.save(nifti_img, output_file)
+
+    nifti_img = nib.Nifti1Image(XCAT, affine=np.eye(4))  # Replace affine if necessary
+    # Save the NIfTI image to a file
+    output_file = 'output_xcat.nii.gz'  # Replace with your desired output file name
     nib.save(nifti_img, output_file)
