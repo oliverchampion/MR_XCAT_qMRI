@@ -19,11 +19,14 @@ def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False, interleav
 
         # Access the variables in the loaded .mat file
         XCAT = mat_data['IMG']
-        XCAT = XCAT[0:-1:2,0:-1:2,10:160:3]
+        XCAT = XCAT[0:-1:2,0:-1:2,10:160:4]
 
         tissue_included, D, f, Ds = contrast_curve_calc()
-
-        S = XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds)
+        S, Dim, fim, Dpim = XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds)
+        if state == 1:
+            Dim_out = Dim
+            fim_out = fim
+            Dpim_out = Dpim
 
         if rician:
             S = np.abs(S + np.random.normal(loc=0, scale = noise, size = np.shape(S)) + 1j * np.random.normal(loc=0, scale = noise, size = np.shape(S)))
@@ -69,7 +72,7 @@ def phantom(bvalue, noise, TR=3000, TE=40, motion=False, rician=False, interleav
                         state2 = state2+1
     else:
         S=np.squeeze(totsig)
-    return S, XCAT
+    return S, XCAT, Dim_out, fim_out, Dpim_out
 
 
 def ivim(bvalues,D,f,Ds):
@@ -327,10 +330,12 @@ def XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds, b0=3, ivim_c
     # Tissue[72, :] = [312.4, 117.4, 377, 97.5]
     Tissue[72, :] = [9999999999, 0.00000001, 999999999, 0.00000001] ## fat suppression
     Tissue[73, :] = [0, 0, 1676, 64]
-
+    Dim= np.zeros(XCAT.shape, dtype=np.float32)
+    fim= np.zeros(XCAT.shape, dtype=np.float32)
+    Dpim= np.zeros(XCAT.shape, dtype=np.float32)
     MR = np.zeros(XCAT.shape+(len(bvalue),), dtype=np.float32)
     for iTissue in range(len(Tissue)):
-        if iTissue is not 0:
+        if iTissue != 0:
             if b0 == 1.5:
                 T1 = Tissue[iTissue, 0]
                 T2 = Tissue[iTissue, 1]
@@ -340,10 +345,15 @@ def XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds, b0=3, ivim_c
 
             if ivim_cont and iTissue in tissue_included:
                 # note we are assuming blood fraction has the same T1 as tissue fraction here for simplicity. Can be changed in future.
-                S0 = ivim(bvalue,D[iTissue],f[iTissue],Ds[iTissue])
+                Dtemp=D[iTissue]
+                ftemp=f[iTissue]
+                Dstemp=Ds[iTissue]
             else:
-                S0 = ivim(bvalue, 5e-4+np.random.rand(1)*3e-3, np.random.rand(1)*0.5, 5e-3+np.random.rand(1)*1e-1)
+                Dtemp=5e-4+np.random.rand(1)*3e-3
+                ftemp=np.random.rand(1)*0.5
+                Dstemp=5e-3+np.random.rand(1)*1e-1
                 #S0 = np.zeros(len(bvalue))
+            S0 = ivim(bvalue,Dtemp,ftemp,Dstemp)
             if T1 > 0 or T2 > 0:
                 if Contrast == 'GRE':
                     if iTissue not in [31, 32, 33]:
@@ -358,17 +368,22 @@ def XCAT_to_MR_DCE(XCAT, TR, TE, bvalue, tissue_included, D, f, Ds, b0=3, ivim_c
                         -TE / T2)
                 else:
                     raise ValueError('Unknown MR contrast. Use only GRE, bSSFP, or SE.')
-    return MR
+            Dim = Dim + (XCAT == iTissue) * Dtemp
+            fim = fim + (XCAT == iTissue) * ftemp
+            Dpim = Dpim + (XCAT == iTissue) * Dstemp
+    return MR, Dim, fim, Dpim
 
 if __name__ == '__main__':
     bvalue = np.array([0., 1, 2, 5, 10, 20, 30, 50, 75, 100, 150, 250, 350, 400, 550, 700, 850, 1000])
     noise = 0.005
-    motion = True
-    sig, XCAT = phantom(bvalue, noise,motion=motion,interleaved=True)
+    motion = False
+    sig, XCAT, Dim,fim,Dpim = phantom(bvalue, noise,motion=motion,interleaved=False)
     sig = sig * 50000
     sig = np.flip(sig,axis=0)
     sig = np.flip(sig,axis=1)
-    nifti_img = nib.Nifti1Image(sig, affine=np.eye(4))  # Replace affine if necessary
+    res=np.eye(4)
+    res[2]=2
+    nifti_img = nib.Nifti1Image(sig, affine=res)  # Replace affine if necessary
     # Save the NIfTI image to a file
     if motion:
         output_file = 'output_resp_int.nii.gz'  # Replace with your desired output file name
@@ -376,7 +391,24 @@ if __name__ == '__main__':
         output_file = 'output.nii.gz'  # Replace with your desired output file name
     nib.save(nifti_img, output_file)
 
-    nifti_img = nib.Nifti1Image(XCAT, affine=np.eye(4))  # Replace affine if necessary
+    nifti_img = nib.Nifti1Image(XCAT, affine=res)  # Replace affine if necessary
     # Save the NIfTI image to a file
     output_file = 'output_xcat.nii.gz'  # Replace with your desired output file name
     nib.save(nifti_img, output_file)
+
+    nifti_img = nib.Nifti1Image(Dim*1000000, affine=res)  # Replace affine if necessary
+    # Save the NIfTI image to a file
+    output_file = 'D.nii.gz'  # Replace with your desired output file name
+    nib.save(nifti_img, output_file)
+
+    nifti_img = nib.Nifti1Image(fim*1000, affine=res)  # Replace affine if necessary
+    # Save the NIfTI image to a file
+    output_file = 'f.nii.gz'  # Replace with your desired output file name
+    nib.save(nifti_img, output_file)
+
+    nifti_img = nib.Nifti1Image(Dpim*1000, affine=res)  # Replace affine if necessary
+    # Save the NIfTI image to a file
+    output_file = 'Dp.nii.gz'  # Replace with your desired output file name
+    nib.save(nifti_img, output_file)
+
+    np.savetxt('bvals.txt', bvalue)
